@@ -1,18 +1,38 @@
 # Fundamentals of CUDA Programming
 
+---
+
 ## The GPU Philosophy: Bandwidth over Latency
 
 Think of a CPU as a Ferrari: it gets one or two people to a destination incredibly fast. A GPU is a massive fleet of buses: each bus is slower than the Ferrari, but together they can move an entire city's population at once.
+
+---
 
 ## The Hierarchy of Computation
 
 To manage these thousands of threads, CUDA organizes them into a clear hierarchy. You must memorize this structure to write any kernel:
 
 - **Thread:** The smallest unit of work. Executes your "Kernel" function.
-- **Block:** A group of threads. Threads in the same block can "talk" to each other via shared memory and synchronize.
-- **Grid:** A collection of blocks that make up a single "Kernel" launch. Blocks within a grid are independent—they cannot reliably communicate.
+
+- **Block:** A group of threads. Threads in the same block can "talk" to each other via shared memory and synchronizing their execution.
+
+  *Note: an example of synchronization is: let's say thread A sets x = 5, and thread B uses x. If A and B are in the same block, we could make B wait for A before using x. You can't do this between blocks.*
+
+- **Grid:** A collection of blocks that make up a single "Kernel" launch. Blocks within a grid are independent—they cannot reliably communicate. Block execution order is undefined.
 
 ![hierarchy](assets/hierarchy.jpg)
+
+*Hardware Example:*
+
+A **Cluster** is a new hierarchy level that groups multiple thread blocks together.
+
+**CUDA Cores** are designed for **SIMT** (Single Instruction, Multiple Threads) processing.
+
+**Tensor Cores** are specialized for **Matrix Math**.
+
+![sm](/Users/yuanliheng/Desktop/CS368/notes/assets/sm.jpg)
+
+---
 
 ## The Programmer’s Workflow
 
@@ -27,6 +47,10 @@ To manage these thousands of threads, CUDA organizes them into a clear hierarchy
 9. **Free** memory on both sides.
 
 ![hello_world](assets/hello_world.jpg)
+
+*Note for step 4:*
+
+cudaMemcpy is asynchronous.
 
 *Note for step 5:*
 
