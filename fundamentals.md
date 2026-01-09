@@ -30,7 +30,7 @@ A **Cluster** is a new hierarchy level that groups multiple thread blocks togeth
 
 **Tensor Cores** are specialized for **Matrix Math**.
 
-![sm](/Users/yuanliheng/Desktop/CS368/notes/assets/sm.jpg)
+![sm](assets/sm.jpg)
 
 ---
 
