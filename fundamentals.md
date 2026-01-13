@@ -50,7 +50,9 @@ A **Cluster** is a new hierarchy level that groups multiple thread blocks togeth
 
 *Note for step 4:*
 
-cudaMemcpy is asynchronous.
+**`cudaMemcpy()`**: This is blocking. If the data is $> 64$ KiB, the CPU waits until the transfer is finished.
+
+**`cudaMemcpyAsync()`**: This is non-blocking. It requires **Pinned Memory** (`cudaMallocHost`), which is memory that the OS cannot "page out" to the hard drive. This allows the GPU to pull data directly while the CPU moves on to other tasks.
 
 *Note for step 5:*
 
@@ -72,6 +74,14 @@ The first parameter specifies the number of **Blocks** in the grid.
 
 The second parameter specifies the number of **Threads** within each block.
 
+### 3. `sharedMem`
+
+Optional shared memory size (bytes).
+
+### 4. `stream`
+
+Optional Stream ID for concurrency.
+
 *Note for step 7:*
 
 The `cudaDeviceSynchronize()` function is a **blocking call** that ensures all previously issued CUDA operations on the current GPU device are completed before the host (CPU) thread continues execution. 
@@ -85,3 +95,61 @@ $$i = \text{blockIdx.x} \times \text{blockDim.x} + \text{threadIdx.x}$$
 - **`blockIdx.x`**: Which block am I in?
 - **`blockDim.x`**: How many threads are in each block?
 - **`threadIdx.x`**: Which thread am I within my specific block?
+
+---
+
+## Streams and Concurrency
+
+**Stream:** Sequence of operations that execute in issue-order on GPU
+
+![](assets/overlap_memcpy.jpg)
+
+### 1. The Setup (Creating the Marker)
+
+```c++
+cudaEvent_t event;
+cudaEventCreate(&event);
+```
+
+Think of `event` as a **flag**.
+
+### 2. Stream 1: Preparing New Data
+
+```C++
+cudaMemcpyAsync(d_in, in, size, H2D, stream1);
+cudaEventRecord(event, stream1);
+```
+
+- **The Copy:** We tell `stream1` to start moving new input data from the CPU to the GPU.
+- **The Signal:** `event` is recorded after all preceding operations (in this case, memcpy) in `stream1` have been completed.
+
+### 3. Stream 2: Moving Old Data & Waiting
+
+```C++
+cudaMemcpyAsync(out, d_out, size, D2H, stream2);
+cudaStreamWaitEvent(stream2, event);
+```
+
+- **The Parallel Task:** `stream2` starts copying a *previous* result back to the CPU. Because it's a different stream, this can happen at the exact same time as the copy in `stream1`.
+- **The Wait:** Here is the crucial part. `cudaStreamWaitEvent` tells `stream2`: *"Before you execute any more commands in your queue, you must wait until event is signaled."*
+- **Important Note:** This **does not** block the CPU. The CPU keeps running and submits the next command immediately. The waiting happens entirely on the GPU hardware.
+
+### 4. The Final Execution
+
+```
+kernel <<< , , , stream2 >>> (d_in, d_out);
+```
+
+- This kernel is launched in `stream2`.
+- Because of the `WaitEvent` we just issued, this kernel **cannot start** until `stream1` has finished uploading the new data (`d_in`).
+
+------
+
+## Summary of the Flow
+
+| **Stream 1 Activity** | **Stream 2 Activity**     | **Why?**                                                 |
+| --------------------- | ------------------------- | -------------------------------------------------------- |
+| **Copy H2D** (Input)  | **Copy D2H** (Old Result) | They run in parallel to hide latency.                    |
+| **Record Event**      |                           | Marks that Input is ready.                               |
+|                       | **Wait Event**            | Stream 2 pauses its queue until Stream 1's copy is done. |
+|                       | **Kernel Launch**         | Uses the Input that Stream 1 just finished moving.       |
