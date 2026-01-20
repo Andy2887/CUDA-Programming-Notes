@@ -24,13 +24,32 @@ To manage these thousands of threads, CUDA organizes them into a clear hierarchy
 
 *Hardware Example:*
 
-A **Cluster** is a new hierarchy level that groups multiple thread blocks together.
+A **Cluster** is a new hierarchy level that groups multiple thread blocks together. Each cluster has its own **Warp Scheduler** and **Dispatch Unit**. 
 
 **CUDA Cores** are designed for **SIMT** (Single Instruction, Multiple Threads) processing.
 
 **Tensor Cores** are specialized for **Matrix Math**.
 
+Each thread can use up to **255 registers**. 
+
 ![sm](assets/sm.jpg)
+
+**Turing architecture:**
+– Up to 16 Blocks per SM
+– Up to 32 Warps per SM
+– Up to 1024 threads per SM
+– Up to 1024 threads per block
+
+**Wrap:** the basic unit of execution, containing 32 threads.
+
+*Why do we need Wrap?* Every processor needs to **Fetch** an instruction (like "Add these numbers"), **Decode** it, and then **Execute** it.  Instead of 32 threads having 32 fetchers and 32 decoders, the GPU has **one** fetcher and **one** decoder for the whole warp.
+
+### The Scoreboard: Traffic Control
+
+How does the hardware know when it's safe to run an instruction? It uses a **Scoreboard**.
+
+- **Math Instructions:** These have "static" latency. The GPU knows exactly how many cycles a `float` addition takes.
+- **Long-Latency Operations (Memory/Texture):** These are unpredictable. If you request data from Global Memory, it might take 400+ cycles. The scoreboard tracks these requests. If a warp is waiting for data, the scoreboard tells the scheduler: *"Skip this warp for now; it's still waiting for its delivery from the DRAM."*
 
 ---
 
@@ -84,7 +103,7 @@ Optional Stream ID for concurrency.
 
 *Note for step 7:*
 
-The `cudaDeviceSynchronize()` function is a **blocking call** that ensures all previously issued CUDA operations on the current GPU device are completed before the host (CPU) thread continues execution. 
+The `cudaDeviceSynchronize()` function is a **blocking call** that ensures all previously issued **CUDA operations** on the current GPU device are **completed** before the host (CPU) thread continues execution. 
 
 *Note for GPU function in the example:*
 
@@ -96,6 +115,10 @@ $$i = \text{blockIdx.x} \times \text{blockDim.x} + \text{threadIdx.x}$$
 - **`blockDim.x`**: How many threads are in each block?
 - **`threadIdx.x`**: Which thread am I within my specific block?
 
+We need `if (i < N)` because some of the blocks might not need all the threads.
+
+For example, assume we need to calculate 5 data points. We have 2 blocks and threads/block is 4, then the last block will not use all the threads. 
+
 ---
 
 ## Streams and Concurrency
@@ -103,6 +126,12 @@ $$i = \text{blockIdx.x} \times \text{blockDim.x} + \text{threadIdx.x}$$
 **Stream:** Sequence of operations that execute in issue-order on GPU
 
 ![](assets/overlap_memcpy.jpg)
+
+![](assets/concurrent_copy_and_execute.jpg)
+
+### Event Synchronization
+
+![](assets/event_sync.jpg)
 
 ### 1. The Setup (Creating the Marker)
 
@@ -143,9 +172,7 @@ kernel <<< , , , stream2 >>> (d_in, d_out);
 - This kernel is launched in `stream2`.
 - Because of the `WaitEvent` we just issued, this kernel **cannot start** until `stream1` has finished uploading the new data (`d_in`).
 
-------
-
-## Summary of the Flow
+### Summary of the Flow
 
 | **Stream 1 Activity** | **Stream 2 Activity**     | **Why?**                                                 |
 | --------------------- | ------------------------- | -------------------------------------------------------- |
@@ -153,3 +180,54 @@ kernel <<< , , , stream2 >>> (d_in, d_out);
 | **Record Event**      |                           | Marks that Input is ready.                               |
 |                       | **Wait Event**            | Stream 2 pauses its queue until Stream 1's copy is done. |
 |                       | **Kernel Launch**         | Uses the Input that Stream 1 just finished moving.       |
+
+---
+
+## Variable Declaration
+
+### 1. `__device__` (Global Memory)
+
+Variables declared with `__device__` reside in **Global Memory**. .
+
+- **Scope:** Visible to all threads across all blocks and to the host (CPU).
+- **Lifetime:** Application.
+- **Capacity:** Limited only by the GPU’s total VRAM (e.g., 8GB, 24GB).
+- **Usage:** Used for large datasets that need to be processed by multiple kernels.
+- **Performance:** Slow.
+- **Allocation:** cudaMalloc()
+
+### 2. `__constant__` (Constant Memory)
+
+Variables declared with `__constant__` reside in a specialized, **read-only** section of device memory.
+
+- **Scope:** Visible to all threads across all blocks; read-only for the GPU.
+- **Lifetime:** Application.
+- **Capacity:** Usually limited to **64 KB**.
+- **Usage:** Perfect for "broadcast" data—values that every thread needs to read at the same time.
+- **Performance:** Fast.
+- **Allocation:** cudaMemcpyToSymbol()
+
+### 3. `__shared__` (Shared Memory)
+
+Variables declared with `__shared__` are located **on-chip**. This is a high-speed, programmer-managed cache that is shared **within a single thread block**.
+
+- **Scope:** Visible only to threads **within the same block**.
+- **Lifetime:** Kernel launch.
+- **Capacity:** Very small (typically 48KB to 100KB per block/SM).
+- **Usage:** Used for inter-thread communication (e.g., a parallel reduction sum) or to "tile" data to avoid repeated slow reads from Global Memory.
+- **Performance:** Fast.
+
+### 4. Unqualified Variables
+
+Stored in registers (if don’t fit: global memory).
+
+
+
+
+
+
+
+
+
+
+
