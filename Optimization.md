@@ -40,6 +40,32 @@ Some newer architectures allow you to configure banks to be 8 bytes wide to bett
 
 Move data in shared memory, and assign each thread to its own bank
 
+*Example:*
+
+```c++
+// CUDA program to perform element wise multiplication of two arrays
+// Each thread will calculate one value in the result array R
+__global__ void ElementwiseMulKernel(float* Md, float* Nd, float* Rd)
+{
+  	// 1. read data into shared memory
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    
+    __shared__ float shared_Md[TILE_SIZE];
+    __shared__ float shared_Nd[TILE_SIZE];
+
+    shared_Md[threadIdx.x] = Md[idx];
+    shared_Nd[threadIdx.x] = Nd[idx];
+    __syncthreads();
+
+  	// 2. compute result
+    float p_result = shared_Md[threadIdx.x] * shared_Nd[threadIdx.x];
+    __syncthreads();
+  
+  	// 3. write data back to shared memory
+    Rd[idx] = p_result;
+}
+```
+
 ---
 
 ## Optimization Strategy 2: Memory Coalescing
