@@ -43,26 +43,42 @@ Move data in shared memory, and assign each thread to its own bank
 *Example:*
 
 ```c++
-// CUDA program to perform element wise multiplication of two arrays
-// Each thread will calculate one value in the result array R
-__global__ void ElementwiseMulKernel(float* Md, float* Nd, float* Rd)
-{
-  	// 1. read data into shared memory
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    
-    __shared__ float shared_Md[TILE_SIZE];
-    __shared__ float shared_Nd[TILE_SIZE];
+// CUDA program to perform matrix multiplication
+#define TILE_WIDTH 16
 
-    shared_Md[threadIdx.x] = Md[idx];
-    shared_Nd[threadIdx.x] = Nd[idx];
+__global__ void matrixMulTiled(float* A, float* B, float* C, int width) {
+  // 1, Create shared memory for tiles
+  __shared__ float ds_A[TILE_WIDTH][TILE_WIDTH];
+  __shared__ float ds_B[TILE_WIDTH][TILE_WIDTH];
+
+  int bx = blockIdx.x; int by = blockIdx.y;
+  int tx = threadIdx.x; int ty = threadIdx.y;
+
+  // calculate the global index of the result
+  int row = by * TILE_WIDTH + ty;
+  int col = bx * TILE_WIDTH + tx;
+
+  float p_value = 0.0;
+  int num_tiles = (width + TILE_WIDTH - 1) / TILE_WIDTH;
+
+  for (int m = 0; m < num_tiles; m++) {
+    // 2, Load the data into shared memory
+    // each thread will load exactly one data point
+    ds_A[ty][tx] = A[row * width + (m * TILE_WIDTH + tx)];
+    ds_B[ty][tx] = B[(m * TILE_WIDTH + ty) * width + col];
     __syncthreads();
 
-  	// 2. compute result
-    float p_result = shared_Md[threadIdx.x] * shared_Nd[threadIdx.x];
+    // 3, Perform calculation (partial)
+    for (int k = 0; k < TILE_WIDTH; k++) {
+      p_value += ds_A[ty][k] + ds_B[k][tx];
+    }
     __syncthreads();
-  
-  	// 3. write data back to shared memory
-    Rd[idx] = p_result;
+
+  }
+
+  // 4, Write result to global memory
+  C[row * width + col] = p_value;
+
 }
 ```
 
@@ -72,6 +88,32 @@ __global__ void ElementwiseMulKernel(float* Md, float* Nd, float* Rd)
 
 When 32 threads in a warp access a contiguous 128-byte block of memory, the GPU can fulfill that with a **single memory transaction**.
 
+In practice, here is how you achieve and verify memory coalescing.
+
+1. Ensure your global index maps directly to your array index without gaps.
+
+   ```c++
+   // Coalesced Access
+   int tid = blockIdx.x * blockDim.x + threadIdx.x;
+   float val = data[tid];
+   
+   // Non-coalesced Access (uses stride 4 in this case)
+   int tid = blockIdx.x * blockDim.x + threadIdx.x * 4;
+   float val = data[tid];
+   ```
+
+2. Use Structure of Arrays instead of Array of Structures
+
+   **AoS (Bad for Coalescing):** `struct Particle { float x, y, z; } particles[N];`
+
+   - Thread 0 reads `particles[0].x`, Thread 1 reads `particles[1].x`.
+   - The addresses are separated by the size of the struct (3 floats), creating a stride.
+
+   **SoA (Good for Coalescing):** `struct Particles { float x[N], y[N], z[N]; }`
+
+   - Thread 0 reads `x[0]`, Thread 1 reads `x[1]`.
+   - The addresses are perfectly contiguous.
+
 ---
 
 ## Optimization Strategy 3: Managing Occupancy (TLP vs. ILP)
@@ -80,7 +122,7 @@ When 32 threads in a warp access a contiguous 128-byte block of memory, the GPU 
 
 **Instruction-Level Parallelism (ILP):** Sometimes, using *more* registers per thread allows the compiler to break dependencies and execute more instructions in parallel within a single thread.
 
-Example:
+*Example:*
 
 Assume we have a very long calculation ($1000 \times 999 \times 998 \times \dots \times 1$), but we only have a few registers to store our value. We will need to wait for the registers to be free before storing the intermediate results of the calculations.
 
@@ -89,5 +131,9 @@ Assume we have a very long calculation ($1000 \times 999 \times 998 \times \dots
 ## Optimization Strategy 4: Control Flow & Precision
 
 Avoid `if/else` statements where threads in the same warp take different paths. This "divergence" forces the warp to execute both paths sequentially, idling half the threads.
+
+*Example of why divergence is not desirable:*
+
+![](assets/bad_example.jpg)
 
 Only use **Double Precision (FP64)** if absolutely necessary. On the RTX 2060, FP32 throughput is **32x faster** than FP64.
