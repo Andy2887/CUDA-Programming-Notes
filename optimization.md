@@ -82,6 +82,23 @@ __global__ void matrixMulTiled(float* A, float* B, float* C, int width) {
 }
 ```
 
+*Another Example:*
+
+Original code:
+
+<img src="assets/origin.jpg" style="zoom:50%;" />
+
+Updated code:
+
+<img src="assets/updated.jpg" style="zoom:50%;" />
+
+Why updated code is better:
+
+1. The updated code access global memory in contiguous chunks.
+2. When modifying value, we do it in shared memory, which is way faster.
+
+<img src="assets/exp.jpg" style="zoom:50%;" />
+
 ---
 
 ## Optimization Strategy 2: Memory Coalescing

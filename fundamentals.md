@@ -45,6 +45,8 @@ Each thread can use up to **255 registers**.
 
 *Why do we need Wrap?* Every processor needs to **Fetch** an instruction (like "Add these numbers"), **Decode** it, and then **Execute** it.  Instead of 32 threads having 32 fetchers and 32 decoders, the GPU has **one** fetcher and **one** decoder for the whole warp.
 
+Note: In a block, the threads with the smallest global index gets executed first.
+
 **The "Golden Rule" of Block Size:** for most modern NVIDIA GPUs, a block size of **256 threads** is the most common starting point.
 
 ### The Scoreboard: Traffic Control
