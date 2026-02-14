@@ -57,7 +57,7 @@ When optimizing CUDA, you should prioritize the metrics in this order:
 
 1. **DRAM Throughput:** The bandwidth used between the GPU chip and the global VRAM.
 
-   If this is high, you are "Memory Bound." You need to improve memory coalescing or use Shared Memory to reduce global memory accesses.
+   If this is high, you are "Memory Bound." You need to reduce global memory accesses - improve memory coalescing or use Shared Memory.
 
 2. **Compute (SM) Throughput:** 
 
@@ -65,7 +65,7 @@ When optimizing CUDA, you should prioritize the metrics in this order:
 
 3. **L1/TEX Cache Throughput:** 
 
-   If this is high, it means the ALUs are waiting on data from the L1 cache or Shared Memory.
+   If this is high, it means the ALUs are waiting on data from the L1 cache or Shared Memory. You need to improve your memory access.
 
 ---
 

@@ -30,16 +30,7 @@ A **Cluster** is a new hierarchy level that groups multiple thread blocks togeth
 
 **Tensor Cores** are specialized for **Matrix Math**.
 
-Each thread can use up to **255 registers**. 
-
 ![sm](assets/sm.jpg)
-
-**Turing architecture:**
-
-1. Up to 16 Blocks per SM
-2. Up to 32 Warps per SM
-3. Up to 1024 threads per SM
-4. Up to 1024 threads per block
 
 **Wrap:** the basic unit of execution, containing 32 threads.
 
@@ -47,14 +38,21 @@ Each thread can use up to **255 registers**.
 
 Note: In a block, the threads with the smallest global index gets executed first.
 
-**The "Golden Rule" of Block Size:** for most modern NVIDIA GPUs, a block size of **256 threads** is the most common starting point.
+### How to determine the block size?
 
-### The Scoreboard: Traffic Control
+1. **Use multiples of 32**
 
-How does the hardware know when it's safe to run an instruction? It uses a **Scoreboard**.
+2. **Filling up the SM**
 
-- **Math Instructions:** These have "static" latency. The GPU knows exactly how many cycles a `float` addition takes.
-- **Long-Latency Operations (Memory/Texture):** These are unpredictable. If you request data from Global Memory, it might take 400+ cycles. The scoreboard tracks these requests. If a warp is waiting for data, the scoreboard tells the scheduler: *"Skip this warp for now; it's still waiting for its delivery from the DRAM."*
+   (1) Num block limit per SM
+
+   (2) Num of threads limit per SM
+
+3. **Consider registers and shared memory pressure**
+
+   The number of registers and amount of shared memory on a SM is fixed. If each thread or block uses more registers or shared memory, you might allocate less threads and shared memory on your SM.
+
+   You could check "Section: Launch Statistics" of your analysis from Nsight Compute for registers per thread and shared memory per block used.
 
 ---
 
