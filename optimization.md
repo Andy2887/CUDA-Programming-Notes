@@ -26,14 +26,6 @@ In this mode, each bank is exactly 4 bytes wide. Look at the binary addresses in
 
 *Note: If Thread A wants Byte 6 and Thread B wants Byte 133, they are hitting the **same bank** (Bank 1). This causes a **bank conflict**, and the hardware must process them sequentially.*
 
-### Example B: 8-Byte Bank Width
-
-Some newer architectures allow you to configure banks to be 8 bytes wide to better support `double` precision or larger data types.
-
-- **Addr1 (Byte 6):** Now fits into **Bank 0**, which now covers bytes 0-7.
-- **Addr2 (Byte 133):** Now fits into **Bank 16**.
-- **The Result:** Because they are now in different banks, these two requests can be served **simultaneously** with zero conflict.
-
 ---
 
 ## Optimization Strategy 1: Shared Memory
@@ -41,48 +33,6 @@ Some newer architectures allow you to configure banks to be 8 bytes wide to bett
 Move data in shared memory, and assign each thread to its own bank
 
 *Example:*
-
-```c++
-// CUDA program to perform matrix multiplication
-#define TILE_WIDTH 16
-
-__global__ void matrixMulTiled(float* A, float* B, float* C, int width) {
-  // 1, Create shared memory for tiles
-  __shared__ float ds_A[TILE_WIDTH][TILE_WIDTH];
-  __shared__ float ds_B[TILE_WIDTH][TILE_WIDTH];
-
-  int bx = blockIdx.x; int by = blockIdx.y;
-  int tx = threadIdx.x; int ty = threadIdx.y;
-
-  // calculate the global index of the result
-  int row = by * TILE_WIDTH + ty;
-  int col = bx * TILE_WIDTH + tx;
-
-  float p_value = 0.0;
-  int num_tiles = (width + TILE_WIDTH - 1) / TILE_WIDTH;
-
-  for (int m = 0; m < num_tiles; m++) {
-    // 2, Load the data into shared memory
-    // each thread will load exactly one data point
-    ds_A[ty][tx] = A[row * width + (m * TILE_WIDTH + tx)];
-    ds_B[ty][tx] = B[(m * TILE_WIDTH + ty) * width + col];
-    __syncthreads();
-
-    // 3, Perform calculation (partial)
-    for (int k = 0; k < TILE_WIDTH; k++) {
-      p_value += ds_A[ty][k] + ds_B[k][tx];
-    }
-    __syncthreads();
-
-  }
-
-  // 4, Write result to global memory
-  C[row * width + col] = p_value;
-
-}
-```
-
-*Another Example:*
 
 Original code:
 
@@ -103,7 +53,7 @@ Why updated code is better:
 
 ## Optimization Strategy 2: Memory Coalescing
 
-When 32 threads in a warp access a contiguous 128-byte block of memory, the GPU can fulfill that with a **single memory transaction**.
+When 32 threads in a warp access a contiguous **128-byte** block of memory, the GPU can fulfill that with a **single memory transaction**.
 
 In practice, here is how you achieve and verify memory coalescing.
 
@@ -133,19 +83,7 @@ In practice, here is how you achieve and verify memory coalescing.
 
 ---
 
-## Optimization Strategy 3: Managing Occupancy (TLP vs. ILP)
-
-**Thread-Level Parallelism (TLP):** If your kernel uses fewer registers per thread, you can fit more blocks on the SM. This "hides" memory latency by having more threads ready to work.
-
-**Instruction-Level Parallelism (ILP):** Sometimes, using *more* registers per thread allows the compiler to break dependencies and execute more instructions in parallel within a single thread.
-
-*Example:*
-
-Assume we have a very long calculation ($1000 \times 999 \times 998 \times \dots \times 1$), but we only have a few registers to store our value. We will need to wait for the registers to be free before storing the intermediate results of the calculations.
-
----
-
-## Optimization Strategy 4: Control Flow & Precision
+## Optimization Strategy 3: Control Flow
 
 Avoid `if/else` statements where threads in the same warp take different paths. This "divergence" forces the warp to execute both paths sequentially, idling half the threads.
 
@@ -153,4 +91,16 @@ Avoid `if/else` statements where threads in the same warp take different paths. 
 
 ![](assets/bad_example.jpg)
 
-Only use **Double Precision (FP64)** if absolutely necessary. On the RTX 2060, FP32 throughput is **32x faster** than FP64.
+---
+
+## Optimization Strategy 4: Managing Occupancy
+
+**Occupancy** is the ratio of active warps on a Streaming Multiprocessor (SM) to the maximum number of warps that SM can theoretically support. For example, if an SM can hold 64 warps but only 32 are active, occupancy is 50%.
+
+**If your arithmetic intensity is low** enough that stalls happens often, try to have more active wraps on a SM.
+
+---
+
+## Optimization Strategy 5: Avoiding Bank Conflicts
+
+Each thread in a wrap should **only access one address**.

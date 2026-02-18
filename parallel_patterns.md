@@ -286,3 +286,79 @@ __global__ void reduce0(int *g_idata, int *g_odata) {
 }
 ```
 
+---
+
+## Histograms
+
+TODO
+
+---
+
+## Parallel Prefix Scan
+
+**Prefix Sum** means: at each position, give me the running total of everything up to and including that element.
+
+```c
+y[0] = x[0];
+for (i = 1; i < N; i++)
+    y[i] = y[i-1] + x[i];
+```
+
+### Inclusive Scan
+
+#### Phase 1: The Reduction
+
+```c
+int stride = 1;
+while (stride < BLOCK_SIZE) {
+    int index = (threadIdx.x+1)*stride*2 - 1;
+    if (index < BLOCK_SIZE)
+        scan_array[index] += scan_array[index - stride];
+    stride *= 2;
+    __syncthreads();
+}
+```
+
+<img src="assets/sweep_up.jpg" style="zoom:50%;" />
+
+After this, **some** positions already have their correct scan values. But most positions are still wrong.
+
+#### Phase 2: The Post-Scan (Sweep Down)
+
+The key idea is to "distribute" the partial sums that the reduction computed to the positions that still need them.
+
+```c
+int stride = BLOCK_SIZE >> 1;
+while (stride > 0) {
+    int index = (threadIdx.x+1)*stride*2 - 1;
+    if (index + stride < BLOCK_SIZE)
+        scan_array[index + stride] += scan_array[index];
+    stride >>= 1;
+    __syncthreads();
+}
+```
+
+<img src="assets/scan_down.jpg" style="zoom:50%;" />
+
+### Exclusive Scan
+
+Phase 1 is the same as inclusive scan. We'll just look at phase 2.
+
+<img src="assets/scan_down_exclusive.jpg" style="zoom:50%;" />
+
+**Handling non-power-of-two sizes:** The leftover elements that don't fill a complete block are handled by a special kernel that pads the shared memory to the next power of two with zeros, so the scan logic still works correctly.
+
+### Multiple Blocks Exclusive Scan
+
+**Step 1:** Split the large array into blocks. Each block is scanned independently.
+
+**Step 2:** Before clearing the last element (a step in the scan algorithm), you save the total sum of that block into a separate array called SUMS.
+
+**Step 3:** Scan SUM, producing an array called INCR.
+
+**Step 4:** Adds INCR[i] to every element in block i
+
+*Example:*
+
+<img src="assets/multiple_block_prescan.jpg" style="zoom:50%;" />
+
